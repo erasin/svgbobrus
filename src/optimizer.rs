@@ -7,12 +7,119 @@ use super::Settings;
 
 pub struct Optimizer {
     elements: Vec<(Loc, Vec<Element>)>,
+    /// eaten elements, loc of the component
+    /// and the index of the element in the compponent
+    /// 0 when there is only 1 element
+    eaten: Vec<(Loc, usize)>
 }
 
 impl Optimizer {
     pub fn new(elements: Vec<(Loc, Vec<Element>)>) -> Optimizer {
-        Optimizer { elements: elements }
+        Optimizer 
+            { elements: elements,
+              eaten :vec![]
+            }
     }
+
+    fn trace(&mut self, loc: &Loc, chain: &Vec<Element>) -> Vec<Element>{
+        let neighbors = loc.neighbors();
+        for neighbor in neighbors {
+            let absorbs = self.absorb_reduce(&neighbor, chain);
+            match absorbs {
+                Some(absorbs) => {
+                    let mut extended_chain = vec![];
+                    extended_chain.extend(chain.clone());
+                    let traced = self.trace(&neighbor, &absorbs);
+                    return traced;
+                },
+                None => {
+                    println!("nothing absorved in this neighbor: {:?}", neighbor);
+                    println!("moving on...");
+                    return chain.clone();
+                },
+            }
+        }
+        chain.clone()
+    }
+
+    fn absorb_reduce(&mut self, loc: &Loc, chain: &Vec<Element>) -> Option<Vec<Element>> {
+        let last = chain.iter().last(); 
+        match last{
+            Some(last) => {
+                let absorbs = self.absorb(loc, last);
+                if absorbs.len() > 0 {
+                    let mut all = vec![];
+                    let mut eater = last.clone();
+                    let mut unreduced = vec![];
+                    for abs in absorbs{
+                        match eater.reduce(&abs){
+                            Some(reduced) => {
+                                eater = reduced;
+                            },
+                            None => {
+                                unreduced.push(abs);
+                            }
+                        }
+                    }
+                    all.push(eater);
+                    all.extend(unreduced);
+                    Some(all)
+                }else{
+                    None
+                }
+            },
+            None => None
+        }
+    }
+
+    /// recursively call until can pick element within the component
+    /// mark eaten those element which are successfully picked
+    fn absorb(&mut self, loc: &Loc, last_elem: &Element) -> Vec<Element> {
+        let mut component_chain = vec![];
+        while let Some((index, elm)) = self.pick(loc, last_elem){
+           self.eaten.push((loc.clone(),index)); 
+           component_chain.push(elm);
+        }
+        component_chain
+    }
+
+    /// pick which element that can chain to the last element specified
+    /// reverse the each element if necessary
+    /// return the match element and its relative position from the component elements
+    fn pick(&self, loc: &Loc, last_elm: &Element)-> Option<(usize, Element)>{
+        match self.get(loc){
+            Some(elements) => {
+                for i in 0..elements.len(){
+                    if !self.eaten(loc, i){
+                        match last_elm.try_chain(&elements[i]){
+                            Some(chained) => {
+                                return Some((i, chained));
+                            }
+                            None => continue
+                        };
+                    };
+                }
+                None
+            },
+            None => None
+        }
+    }
+
+
+
+    /// check the specific element at this location has been picked or not
+    fn eaten(&self, loc: &Loc, index: usize) -> bool {
+        self.eaten.iter()
+            .find(|&&(ref l, i)| l == loc &&  i == index)
+            .map_or(false, |_| true)
+    }
+
+    fn half_eaten(&self, loc: &Loc) -> bool {
+        self.eaten.iter()
+            .find(|&&(ref l, i)| l == loc )
+            .map_or(false, |_| true)
+    }
+
 
     fn get(&self, loc: &Loc) -> Option<&Vec<Element>> {
         let found = self.elements
@@ -27,98 +134,38 @@ impl Optimizer {
         }
     }
 
-    // return the first element only
-    // there is only one element in the component
-    fn first_element_only(&self, loc: &Loc) -> Option<&Element> {
-        match self.get(loc) {
-            Some(elements) => {
-                if elements.len() == 1 {
-                    elements.get(0)
-                } else {
-                    None
-                }
-            }
-            None => None,
-        }
-    }
-
-    // if the path on this location can be eated
-    // from the left, from the top
-    fn is_edible(&self, loc: &Loc) -> bool {
-        self.can_loc_reduce(&loc.top(), loc) || self.can_loc_reduce(&loc.left(), loc) ||
-        self.can_loc_reduce(&loc.top_left(), loc) ||
-        self.can_loc_reduce(&loc.bottom_left(), loc)
-    }
-    // determine if element in location1
-    // can reduce the element in location2
-    fn can_loc_reduce(&self, loc1: &Loc, loc2: &Loc) -> bool {
-        match self.first_element_only(loc1) {
-            Some(elm1) => self.reduce(elm1, loc2).is_some(),
-            None => false,
-        }
-    }
-
-    fn reduce(&self, elm1: &Element, loc2: &Loc) -> Option<Element> {
-        let elm2 = self.first_element_only(loc2);
-        match elm2 {
-            Some(elm2) => elm1.reduce(elm2),
-            None => None,
-        }
-    }
-    fn trace_elements(&self, element: &Element, loc: &Loc) -> Element {
-        match self.reduce(element, &loc.right()) {
-            Some(reduced) => self.trace_elements(&reduced, &loc.right()),
-            None => {
-                match self.reduce(element, &loc.bottom()) {
-                    Some(reduced) => self.trace_elements(&reduced, &loc.bottom()),
-                    None => {
-                        match self.reduce(element, &loc.bottom_right()) {
-                            Some(reduced) => self.trace_elements(&reduced, &loc.bottom_right()),
-                            None => {
-                                match self.reduce(element, &loc.top_right()) {
-                                    Some(reduced) => {
-                                        self.trace_elements(&reduced, &loc.top_right())
-                                    }
-                                    None => element.clone(),
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
 
     // TODO: order the elements in such a way that
     // the start -> end -> start chains nicely
-    pub fn optimize(&self, settings: &Settings) -> Vec<Element> {
-        let mut optimized = vec![];
-        for &(ref loc, ref elem) in &self.elements {
-            if self.is_edible(&loc) {
-                ;
-            } else {
-                for e in elem {
-                    let traced = self.trace_elements(e, loc);
-                    optimized.push(traced);
+    pub fn optimize(elements: &Vec<(Loc, Vec<Element>)>, settings: &Settings) -> Vec<Element> {
+        let mut optimizer = Optimizer::new(elements.clone());
+        let mut phase1:Vec<(&Loc,Vec<Element>)> = vec![];
+        for &(ref loc, ref elem) in elements {
+            let traced = optimizer.trace(loc, elem);
+            phase1.push((loc, traced));
+        }
+        let mut optimized:Vec<Element> = vec![];
+        for (loc,ph_elements) in phase1{
+            for i in 0..ph_elements.len(){
+                if !optimizer.eaten(loc,i){
+                    optimized.push(ph_elements[0].clone());
+                }else{
+                    println!("skipping {:?}", loc);
                 }
             }
         }
-        if settings.compact_path {
-            self.merge_paths(optimized)
-        } else {
-            optimized
-        }
+        optimized
     }
     // take all paths and non-arrow line in 1 path
     // the text in separated
-    fn merge_paths(&self, elements: Vec<Element>) -> Vec<Element> {
+    fn merge_paths(&self, elements: &Vec<Element>) -> Vec<Element> {
         let mut merged = vec![];
         let mut solid_paths = vec![];
         let mut dashed_paths = vec![];
         let mut arrows = vec![];
         let mut text = vec![];
         for elm in elements {
-            match elm {
+            match *elm {
                 Element::Line(_, _, ref stroke, ref feature) => {
                     match *feature {
                         Feature::Arrow => {
@@ -146,26 +193,26 @@ impl Optimizer {
                 }
             }
         }
-        merged.push(unify(solid_paths, Stroke::Solid));
-        merged.push(unify(dashed_paths, Stroke::Dashed));
+        merged.push(unify(&solid_paths, Stroke::Solid));
+        merged.push(unify(&dashed_paths, Stroke::Dashed));
         merged.extend(arrows);
         merged.extend(text);
         merged
     }
 }
 
-fn unify(elements: Vec<Element>, stroke: Stroke) -> Element {
+fn unify(elements: &Vec<Element>, stroke: Stroke) -> Element {
     let mut paths = String::new();
     let mut last_loc = None;
     let mut start = None;
     for elm in elements {
-        match elm {
-            Element::Line(s, e, _, _) => {
+        match *elm {
+            Element::Line(ref s, ref e, _, _) => {
                 if start.is_none() {
                     start = Some(s.clone());
                 }
                 let match_last_loc = match last_loc {
-                    Some(last_loc) => s == last_loc,
+                    Some(last_loc) => *s == last_loc,
                     None => false,
                 };
                 if match_last_loc {
@@ -175,12 +222,12 @@ fn unify(elements: Vec<Element>, stroke: Stroke) -> Element {
                 }
                 last_loc = Some(e.clone());
             }
-            Element::Arc(s, e, r, sw) => {
+            Element::Arc(ref s, ref e, r, sw) => {
                 if start.is_none() {
                     start = Some(s.clone());
                 }
                 let match_last_loc = match last_loc {
-                    Some(last_loc) => s == last_loc,
+                    Some(last_loc) => *s == last_loc,
                     None => false,
                 };
                 let sweep = if sw { 1 } else { 0 };

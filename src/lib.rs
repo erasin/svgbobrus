@@ -212,6 +212,7 @@ impl Loc {
 
     /// get the 8 neighbors
     pub fn neighbors(&self) -> Vec<Loc> {
+        /*
         vec![self.top(), 
              self.bottom(),
              self.left(),
@@ -220,6 +221,17 @@ impl Loc {
              self.top_right(),
              self.bottom_left(),
              self.bottom_right(),
+            ]
+        */
+
+        vec![self.right(),
+             self.bottom(),
+             self.bottom_right(),
+             self.top_right(),
+             self.bottom_left(),
+             self.top(), 
+             self.left(),
+             self.top_left(),
             ]
     }
 }
@@ -244,10 +256,52 @@ impl Element {
     fn arc(s: &Point, e: &Point, radius: f32, sweep: bool) -> Element {
         Element::Arc(s.clone(), e.clone(), radius, sweep)
     }
+
+    /// create a reverse version of the Element
+    /// implemented by just swapping the start and end
+    /// for arcs, it is just negating the sweep
+    fn reverse(&self) -> Option<Element> {
+        match *self {
+            Element::Line(ref s, ref e, ref stroke, ref feature) => {
+                match *feature{
+                    Nothing => {
+                        Some(Element::Line(e.clone(), s.clone(), stroke.clone(), feature.clone()))
+                    }, //if it has feature, then it can't be reversed
+                    _ => None
+                }
+            },
+            Element::Arc(ref s, ref e, radius, sweep) => {
+                Some(Element::Arc(e.clone(), s.clone(), radius, !sweep))
+            },
+            _ => None
+        } 
+    }
+
+    /// try to chain the element ,reverse ther other element if necessary
+    fn try_chain(&self, other: &Element) -> Option<Element>{
+        match self.chain(other){
+            Some(chained) => {
+                Some(other.clone())
+            },
+            None => {
+                let reversed = other.reverse();
+                match reversed{
+                    Some(reversed) => {
+                        match self.chain(&reversed){
+                            Some(chained) => {
+                                Some(reversed)
+                            },
+                            None => None
+                        }
+                    },
+                    None => None
+                }
+            }
+        } 
+    }
     // this path can chain to the other path
     // chain means the paths can be arranged and express in path definition
     // if self.end == path.start
-    /*
     fn chain(&self, other: &Element) -> Option<Vec<Element>> {
         match *self {
             Element::Line(_, ref e, ref stroke, ref feature) => {
@@ -304,7 +358,6 @@ impl Element {
             Element::Path(_, _, _, _) => None,
         }
     }
-    */
 
     // if this element can reduce the other, return the new reduced element
     // for line it has to be collinear and in can connect start->end->start
@@ -1443,8 +1496,7 @@ impl Grid {
         let mut nodes = vec![];
         let elements = self.get_all_elements(settings);
         let input = if settings.optimize {
-            let optimizer = Optimizer::new(elements);
-            let optimized_elements = optimizer.optimize(settings);
+            let optimized_elements = Optimizer::optimize(&elements, settings);
             optimized_elements
         } else {
             elements.into_iter().flat_map(|(_, elm)| elm).collect()
