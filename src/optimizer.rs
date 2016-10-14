@@ -22,71 +22,87 @@ impl Optimizer {
     }
 
     fn trace(&mut self, loc: &Loc, chain: &Vec<Element>) -> Vec<Element>{
-        let neighbors = loc.neighbors();
-        for neighbor in neighbors {
-            let absorbs = self.absorb_reduce(&neighbor, chain);
-            match absorbs {
-                Some(absorbs) => {
-                    let mut extended_chain = vec![];
-                    extended_chain.extend(chain.clone());
-                    let traced = self.trace(&neighbor, &absorbs);
-                    return traced;
-                },
-                None => {
-                    println!("nothing absorved in this neighbor: {:?}", neighbor);
-                    println!("moving on...");
-                    return chain.clone();
-                },
-            }
-        }
-        chain.clone()
-    }
-
-    fn absorb_reduce(&mut self, loc: &Loc, chain: &Vec<Element>) -> Option<Vec<Element>> {
-        let last = chain.iter().last(); 
-        match last{
-            Some(last) => {
-                let absorbs = self.absorb(loc, last);
-                if absorbs.len() > 0 {
-                    let mut all = vec![];
-                    let mut eater = last.clone();
-                    let mut unreduced = vec![];
-                    for abs in absorbs{
-                        match eater.reduce(&abs){
-                            Some(reduced) => {
-                                eater = reduced;
+        let right = loc.right();
+        let absorbs = self.absorb_reduce(&right, chain); 
+        match absorbs {
+            Some(absorbs) => {
+                self.trace(&right, &absorbs)
+            },
+            None => {
+                let bottom = loc.bottom();
+                let absorbs = self.absorb_reduce(&bottom, chain);
+                match absorbs{
+                    Some(absorbs) => {
+                        self.trace(&bottom, chain)
+                    },
+                    None => {
+                        let left = loc.left();
+                        let absorbs = self.absorb_reduce(&left, chain);
+                        match absorbs{
+                            Some(absorbs) => {
+                                self.trace(&left, chain)
                             },
                             None => {
-                                unreduced.push(abs);
+                                chain.clone()
                             }
                         }
                     }
-                    all.push(eater);
-                    all.extend(unreduced);
-                    Some(all)
-                }else{
-                    None
                 }
             },
-            None => None
+        }
+    }
+
+    /// extend the chain by what is absorbed from this location
+    /// reduce the absorbs when applicable
+    fn absorb_reduce(&mut self, loc: &Loc, chain: &Vec<Element>) -> Option<Vec<Element>> {
+        if !self.all_eaten(loc){
+            let last = chain.iter().last(); 
+            match last{
+                Some(last) => {
+                    let absorbs = self.absorb(loc, last);
+                    if absorbs.len() > 0 {
+                        Some(absorbs)
+                    }else{
+                        None
+                    }
+                },
+                None => None
+            }
+        }else{
+            println!("skipping {:?} it's all eaten up",loc);
+            None
         }
     }
 
     /// recursively call until can pick element within the component
     /// mark eaten those element which are successfully picked
     fn absorb(&mut self, loc: &Loc, last_elem: &Element) -> Vec<Element> {
-        let mut component_chain = vec![];
-        while let Some((index, elm)) = self.pick(loc, last_elem){
-           self.eaten.push((loc.clone(),index)); 
-           component_chain.push(elm);
+        if !self.all_eaten(&loc){
+            let mut component_chain = vec![];
+            let mut eater = last_elem.clone();
+            while let Some((index, elements)) = self.pick(loc, &eater){
+               self.eaten.push((loc.clone(),index)); 
+               for elm in elements{
+                   match eater.reduce(&elm){
+                        Some(reduced) => {
+                            component_chain.push(reduced);
+                        }
+                        None => {
+                            eater = elm.clone();
+                        }
+                   }
+               }
+            }
+            component_chain
+        }else{
+            vec![]
         }
-        component_chain
     }
 
     /// pick which element that can chain to the last element specified
     /// reverse the each element if necessary
     /// return the match element and its relative position from the component elements
-    fn pick(&self, loc: &Loc, last_elm: &Element)-> Option<(usize, Element)>{
+    fn pick(&self, loc: &Loc, last_elm: &Element)-> Option<(usize, Vec<Element>)>{
         match self.get(loc){
             Some(elements) => {
                 for i in 0..elements.len(){
@@ -120,6 +136,22 @@ impl Optimizer {
             .map_or(false, |_| true)
     }
 
+    fn all_eaten(&self, loc: &Loc) -> bool {
+        match self.get(loc){
+            Some(elements) => {
+                let mut total_eaten = 0;
+                for i in 0..elements.len(){
+                    if self.eaten(loc,i){
+                        total_eaten += 1;
+                    }
+                }
+                println!(" at {:?} total_eaten {} == elements.len {}", loc, total_eaten, elements.len());
+                total_eaten == elements.len()
+            }
+            None => false
+        }
+    }
+
 
     fn get(&self, loc: &Loc) -> Option<&Vec<Element>> {
         let found = self.elements
@@ -150,7 +182,7 @@ impl Optimizer {
                 if !optimizer.eaten(loc,i){
                     optimized.push(ph_elements[0].clone());
                 }else{
-                    println!("skipping {:?}", loc);
+                    //println!("skipping {:?}", loc);
                 }
             }
         }

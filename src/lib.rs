@@ -278,10 +278,11 @@ impl Element {
     }
 
     /// try to chain the element ,reverse ther other element if necessary
-    fn try_chain(&self, other: &Element) -> Option<Element>{
+    fn try_chain(&self, other: &Element) -> Option<Vec<Element>>{
         match self.chain(other){
             Some(chained) => {
-                Some(other.clone())
+                println!("matched!");
+                Some(chained)
             },
             None => {
                 let reversed = other.reverse();
@@ -289,7 +290,8 @@ impl Element {
                     Some(reversed) => {
                         match self.chain(&reversed){
                             Some(chained) => {
-                                Some(reversed)
+                                println!("matched reversed");
+                                Some(chained)
                             },
                             None => None
                         }
